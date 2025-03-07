@@ -14,8 +14,7 @@ export default defineConfig({
       noExternal: [
         'xlsx',
         'drizzle-orm',
-        'postgres',
-        '@neondatabase/serverless'
+        'postgres'
       ]
     }
   },

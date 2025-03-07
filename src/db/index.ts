@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from '@neondatabase/serverless';
+import postgres from 'postgres';
 import * as schema from './schema';
 
 // Initialize Supabase client
