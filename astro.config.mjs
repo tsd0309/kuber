@@ -14,7 +14,7 @@ export default defineConfig({
       noExternal: [
         'xlsx',
         'drizzle-orm',
-        'postgres'
+        'pg'
       ]
     }
   },
