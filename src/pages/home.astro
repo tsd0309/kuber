@@ -1,0 +1,559 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db } from '../db';
+import { products } from '../db/schema';
+import { sql } from 'drizzle-orm';
+
+// Get stock statistics
+const highStockMultiplier = 3; // Default multiplier
+const [stockStats] = await db.select({
+    total: sql`count(*)`,
+    soldOut: sql`count(case when stock <= 0 then 1 end)`,
+    lowStock: sql`count(case when stock > 0 and stock < restock_level then 1 end)`,
+    mediumStock: sql`count(case when stock >= restock_level and stock < (restock_level * ${highStockMultiplier}) then 1 end)`,
+    highStock: sql`count(case when stock >= (restock_level * ${highStockMultiplier}) then 1 end)`,
+    totalValue: sql`sum(stock * price)`,
+    soldOutValue: sql`sum(case when stock <= 0 then price else 0 end)`,
+    lowStockValue: sql`sum(case when stock > 0 and stock < restock_level then stock * price else 0 end)`,
+    mediumStockValue: sql`sum(case when stock >= restock_level and stock < (restock_level * ${highStockMultiplier}) then stock * price else 0 end)`,
+    highStockValue: sql`sum(case when stock >= (restock_level * ${highStockMultiplier}) then stock * price else 0 end)`
+}).from(products).all();
+
+// Get products with critical stock levels
+const criticalStockProducts = await db.select({
+    id: products.id,
+    name: products.name,
+    code: products.code,
+    stock: products.stock,
+    price: products.price,
+    restock_level: products.restock_level,
+    stock_value: sql`stock * price`,
+    stock_status: sql`CASE 
+        WHEN stock <= 0 THEN 'Sold Out'
+        WHEN stock < restock_level THEN 'Low Stock'
+        WHEN stock < (restock_level * ${highStockMultiplier}) THEN 'Medium Stock'
+        ELSE 'High Stock'
+    END`
+})
+    .from(products)
+    .where(sql`stock <= restock_level`)
+    .orderBy(sql`cast(stock as float) / cast(restock_level as float)`)
+    .limit(5)
+    .all();
+
+// Get top products by value
+const topValueProducts = await db.select({
+    id: products.id,
+    name: products.name,
+    code: products.code,
+    stock: products.stock,
+    price: products.price,
+    stock_value: sql`stock * price`,
+    stock_status: sql`CASE 
+        WHEN stock <= 0 THEN 'Sold Out'
+        WHEN stock < restock_level THEN 'Low Stock'
+        WHEN stock < (restock_level * ${highStockMultiplier}) THEN 'Medium Stock'
+        ELSE 'High Stock'
+    END`
+})
+.from(products)
+.orderBy(sql`stock * price desc`)
+.limit(5)
+.all();
+
+// Convert stockStats to plain numbers for client-side use
+const clientStockStats = {
+    soldOut: Number(stockStats.soldOut) || 0,
+    lowStock: Number(stockStats.lowStock) || 0,
+    mediumStock: Number(stockStats.mediumStock) || 0,
+    highStock: Number(stockStats.highStock) || 0,
+    totalValue: Number(stockStats.totalValue) || 0,
+    soldOutValue: Number(stockStats.soldOutValue) || 0,
+    lowStockValue: Number(stockStats.lowStockValue) || 0,
+    mediumStockValue: Number(stockStats.mediumStockValue) || 0,
+    highStockValue: Number(stockStats.highStockValue) || 0
+};
+
+// Format currency for display
+function formatCurrency(value) {
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(value);
+}
+---
+
+<Layout title="Home">
+    <div class="min-h-screen transition-colors duration-300 dark:bg-slate-950 bg-slate-50">
+        <div class="px-4 py-6">
+            <h2 class="text-2xl font-bold tracking-tight dark:text-slate-50 text-slate-900 mb-6">Stock Overview</h2>
+            
+            <!-- Stock Statistics Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <!-- Sold Out Card -->
+                <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-red-700 dark:text-red-400">Sold Out</h3>
+                        <span class="text-2xl font-bold text-red-700 dark:text-red-400">{stockStats.soldOut}</span>
+                    </div>
+                    <p class="text-sm text-red-600 dark:text-red-300 mt-1">Products with no stock</p>
+                    <a href="/stock-status/sold-out" class="inline-block mt-3 px-4 py-2 text-sm font-medium text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/40 rounded-md hover:bg-red-200 dark:hover:bg-red-900/60 transition-colors">
+                        View Details
+                    </a>
+                </div>
+
+                <!-- Low Stock Card -->
+                <div class="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-orange-700 dark:text-orange-400">Low Stock</h3>
+                        <span class="text-2xl font-bold text-orange-700 dark:text-orange-400">{stockStats.lowStock}</span>
+                    </div>
+                    <p class="text-sm text-orange-600 dark:text-orange-300 mt-1">Below restock level</p>
+                    <a href="/stock-status/low-stock" class="inline-block mt-3 px-4 py-2 text-sm font-medium text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/40 rounded-md hover:bg-orange-200 dark:hover:bg-orange-900/60 transition-colors">
+                        View Details
+                    </a>
+                </div>
+
+                <!-- Medium Stock Card -->
+                <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-green-700 dark:text-green-400">Medium Stock</h3>
+                        <span class="text-2xl font-bold text-green-700 dark:text-green-400">{stockStats.mediumStock}</span>
+                    </div>
+                    <p class="text-sm text-green-600 dark:text-green-300 mt-1">Above restock level</p>
+                    <a href="/stock-status/medium-stock" class="inline-block mt-3 px-4 py-2 text-sm font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/40 rounded-md hover:bg-green-200 dark:hover:bg-green-900/60 transition-colors">
+                        View Details
+                    </a>
+                </div>
+
+                <!-- High Stock Card -->
+                <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-blue-700 dark:text-blue-400">High Stock</h3>
+                        <span class="text-2xl font-bold text-blue-700 dark:text-blue-400">{stockStats.highStock}</span>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                        <input 
+                            type="range" 
+                            id="highStockMultiplier" 
+                            min="1" 
+                            max="10" 
+                            value="3"
+                            class="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer dark:bg-blue-700"
+                        />
+                        <span id="multiplierValue" class="text-sm text-blue-600 dark:text-blue-300">3x</span>
+                    </div>
+                    <p class="text-sm text-blue-600 dark:text-blue-300 mt-1">Above <span id="multiplierText">3x</span> restock level</p>
+                    <a href="/stock-status/high-stock" class="inline-block mt-3 px-4 py-2 text-sm font-medium text-blue-700 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 rounded-md hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors">
+                        View Details
+                    </a>
+                </div>
+            </div>
+
+            <!-- Charts Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                <!-- Stock Level Distribution -->
+                <div class="bg-white dark:bg-slate-900 border dark:border-slate-800 border-slate-200 rounded-lg p-4">
+                <h3 class="text-lg font-semibold dark:text-slate-50 text-slate-900 mb-4">Stock Level Distribution</h3>
+                    <div class="aspect-square" id="stockChart"></div>
+                </div>
+
+                <!-- Stock Value Distribution -->
+                <div class="bg-white dark:bg-slate-900 border dark:border-slate-800 border-slate-200 rounded-lg p-4">
+                    <h3 class="text-lg font-semibold dark:text-slate-50 text-slate-900 mb-4">Stock Value Distribution</h3>
+                    <div class="aspect-square" id="stockValueChart"></div>
+                </div>
+
+                <!-- Stock Level Trends -->
+                <div class="bg-white dark:bg-slate-900 border dark:border-slate-800 border-slate-200 rounded-lg p-4">
+                    <h3 class="text-lg font-semibold dark:text-slate-50 text-slate-900 mb-4">Stock vs Restock Level</h3>
+                    <div class="aspect-square" id="stockTrendChart"></div>
+                </div>
+
+                <!-- Top Products by Value -->
+                <div class="bg-white dark:bg-slate-900 border dark:border-slate-800 border-slate-200 rounded-lg p-4">
+                    <h3 class="text-lg font-semibold dark:text-slate-50 text-slate-900 mb-4">Top Products by Value</h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full">
+                            <thead>
+                                <tr class="border-b dark:border-slate-800">
+                                    <th class="text-left py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Product</th>
+                                    <th class="text-left py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Code</th>
+                                    <th class="text-right py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Stock</th>
+                                    <th class="text-right py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Value</th>
+                                    <th class="text-right py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {topValueProducts.map(product => (
+                                    <tr class="border-b dark:border-slate-800">
+                                        <td class="py-3 px-4 dark:text-slate-300">{product.name}</td>
+                                        <td class="py-3 px-4 dark:text-slate-300">{product.code}</td>
+                                        <td class="py-3 px-4 text-right dark:text-slate-300">{product.stock}</td>
+                                        <td class="py-3 px-4 text-right dark:text-slate-300">{formatCurrency(product.stock_value)}</td>
+                                        <td class="py-3 px-4 text-right">
+                                            <span class={`inline-flex items-center px-2 py-1 rounded text-xs font-medium
+                                                ${product.stock_status === 'Sold Out' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                                                  product.stock_status === 'Low Stock' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' :
+                                                  product.stock_status === 'Medium Stock' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                                                  'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}`}>
+                                                {product.stock_status}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Products and Critical Stock Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <!-- Critical Stock Table -->
+            <div class="bg-white dark:bg-slate-900 border dark:border-slate-800 border-slate-200 rounded-lg p-4">
+                <h3 class="text-lg font-semibold dark:text-slate-50 text-slate-900 mb-4">Critical Stock Levels</h3>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead>
+                            <tr class="border-b dark:border-slate-800">
+                                <th class="text-left py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Product</th>
+                                <th class="text-left py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Code</th>
+                                <th class="text-right py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Current Stock</th>
+                                <th class="text-right py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Restock Level</th>
+                                <th class="text-right py-3 px-4 text-sm font-medium dark:text-slate-400 text-slate-500">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {criticalStockProducts.map(product => (
+                                <tr class="border-b dark:border-slate-800">
+                                    <td class="py-3 px-4 dark:text-slate-300">{product.name}</td>
+                                    <td class="py-3 px-4 dark:text-slate-300">{product.code}</td>
+                                    <td class="py-3 px-4 text-right dark:text-slate-300">{product.stock}</td>
+                                    <td class="py-3 px-4 text-right dark:text-slate-300">{product.restock_level}</td>
+                                    <td class="py-3 px-4 text-right">
+                                        {product.stock <= 0 ? (
+                                            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
+                                                Sold Out
+                                            </span>
+                                        ) : (
+                                            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
+                                                Low Stock
+                                            </span>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</Layout>
+
+<script is:inline src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script define:vars={{ clientStockStats, criticalStockProducts }}>
+    window.addEventListener('load', function() {
+        // Format currency for charts
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(Number(value) || 0);
+        }
+
+        // Stock Distribution Chart
+        const stockChartOptions = {
+            series: [
+                clientStockStats.soldOut,
+                clientStockStats.lowStock,
+                clientStockStats.mediumStock,
+                clientStockStats.highStock
+            ],
+            chart: {
+                type: 'donut',
+                height: '100%'
+            },
+            labels: ['Sold Out', 'Low Stock', 'Medium Stock', 'High Stock'],
+            colors: ['#ef4444', '#f97316', '#22c55e', '#3b82f6'],
+            legend: {
+                position: 'bottom'
+            },
+            plotOptions: {
+                pie: {
+                    donut: {
+                        size: '70%',
+                        labels: {
+                            show: true,
+                            total: {
+                                show: true,
+                                label: 'Total Products',
+                                formatter: function(w) {
+                                    return w.globals.seriesTotals.reduce((a, b) => a + b, 0);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        // Stock Value Chart
+        const stockValueChartOptions = {
+            series: [{
+                name: 'Stock Value',
+                data: [
+                    { x: 'Sold Out', y: clientStockStats.soldOutValue },
+                    { x: 'Low Stock', y: clientStockStats.lowStockValue },
+                    { x: 'Medium Stock', y: clientStockStats.mediumStockValue },
+                    { x: 'High Stock', y: clientStockStats.highStockValue }
+                ]
+            }],
+            chart: {
+                type: 'bar',
+                height: '100%'
+            },
+            plotOptions: {
+                bar: {
+                    borderRadius: 4,
+                    horizontal: true,
+                    distributed: true
+                }
+            },
+            colors: ['#ef4444', '#f97316', '#22c55e', '#3b82f6'],
+            dataLabels: {
+                enabled: true,
+                formatter: function(value) {
+                    return formatCurrency(value);
+                }
+            },
+            tooltip: {
+                y: {
+                    formatter: function(value) {
+                        return formatCurrency(value);
+                    }
+                }
+            },
+            xaxis: {
+                type: 'category'
+            }
+        };
+
+        // Stock vs Restock Level Chart
+        const stockTrendChartOptions = {
+            series: [{
+                name: 'Current Stock',
+                data: criticalStockProducts.map(p => ({
+                    x: p.name,
+                    y: p.stock,
+                    value: formatCurrency(p.stock_value)
+                }))
+            }, {
+                name: 'Restock Level',
+                data: criticalStockProducts.map(p => ({
+                    x: p.name,
+                    y: p.restock_level,
+                    value: formatCurrency(p.restock_level * p.price)
+                }))
+            }],
+            chart: {
+                type: 'bar',
+                height: '100%',
+                stacked: false
+            },
+            plotOptions: {
+                bar: {
+                    horizontal: false,
+                    columnWidth: '55%',
+                    borderRadius: 2
+                }
+            },
+            dataLabels: {
+                enabled: false
+            },
+            stroke: {
+                show: true,
+                width: 2,
+                colors: ['transparent']
+            },
+            xaxis: {
+                categories: criticalStockProducts.map(p => p.name),
+                labels: {
+                    rotate: -45,
+                    trim: true
+                }
+            },
+            yaxis: {
+                title: {
+                    text: 'Quantity'
+                }
+            },
+            tooltip: {
+                shared: true,
+                intersect: false,
+                y: [{
+                    formatter: function(value, { seriesIndex, dataPointIndex, w }) {
+                        const data = w.config.series[seriesIndex].data[dataPointIndex];
+                        return `${value} units (${formatCurrency(data.value)})`;
+                    }
+                }, {
+                    formatter: function(value, { seriesIndex, dataPointIndex, w }) {
+                        const data = w.config.series[seriesIndex].data[dataPointIndex];
+                        return `${value} units (${formatCurrency(data.value)})`;
+                    }
+                }]
+            }
+        };
+
+        // Top Products Chart
+        const topProductsChartOptions = {
+            series: [{
+                name: 'Stock Value',
+                data: criticalStockProducts
+                    .map(p => ({
+                        x: p.name,
+                        y: Number(p.stock_value) || 0,
+                        status: p.stock_status
+                    }))
+                    .sort((a, b) => b.y - a.y)
+            }],
+                    chart: {
+                type: 'bar',
+                height: '100%'
+            },
+            plotOptions: {
+                bar: {
+                    borderRadius: 4,
+                    horizontal: true,
+                    distributed: true
+                }
+            },
+            colors: criticalStockProducts
+                .sort((a, b) => (Number(b.stock_value) || 0) - (Number(a.stock_value) || 0))
+                .map(p => 
+                    p.stock_status === 'Sold Out' ? '#ef4444' : 
+                    p.stock_status === 'Low Stock' ? '#f97316' : 
+                    p.stock_status === 'Medium Stock' ? '#22c55e' : '#3b82f6'
+                ),
+            dataLabels: {
+                enabled: true,
+                formatter: function(value, { dataPointIndex, w }) {
+                    const data = w.config.series[0].data[dataPointIndex];
+                    return [`${data.x}`, formatCurrency(value)];
+                },
+                style: {
+                    fontSize: '12px'
+                }
+            },
+            xaxis: {
+                type: 'category',
+                labels: {
+                    style: {
+                        fontSize: '12px'
+                    }
+                }
+            },
+            yaxis: {
+                labels: {
+                    formatter: function(value) {
+                        return formatCurrency(value);
+                    }
+                }
+            },
+            tooltip: {
+                y: {
+                    formatter: function(value, { dataPointIndex, w }) {
+                        const data = w.config.series[0].data[dataPointIndex];
+                        return `${formatCurrency(value)} (${data.status})`;
+                    }
+                }
+            }
+        };
+
+        try {
+            // Initialize all charts
+            window.stockChart = new ApexCharts(document.querySelector("#stockChart"), stockChartOptions);
+            window.stockValueChart = new ApexCharts(document.querySelector("#stockValueChart"), stockValueChartOptions);
+            window.stockTrendChart = new ApexCharts(document.querySelector("#stockTrendChart"), stockTrendChartOptions);
+            window.topProductsChart = new ApexCharts(document.querySelector("#topProductsChart"), topProductsChartOptions);
+
+            // Render all charts
+            window.stockChart.render();
+            window.stockValueChart.render();
+            window.stockTrendChart.render();
+            window.topProductsChart.render();
+
+            // Update chart theme when dark mode changes
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.attributeName === 'class') {
+                        const isDark = document.documentElement.classList.contains('dark');
+                        const chartTheme = {
+                            theme: {
+                                mode: isDark ? 'dark' : 'light'
+                            }
+                        };
+
+                        // Update theme for all charts
+                        window.stockChart.updateOptions(chartTheme);
+                        window.stockValueChart.updateOptions(chartTheme);
+                        window.stockTrendChart.updateOptions(chartTheme);
+                        window.topProductsChart.updateOptions(chartTheme);
+                    }
+                });
+            });
+
+            observer.observe(document.documentElement, {
+                attributes: true,
+                attributeFilter: ['class']
+            });
+        } catch (error) {
+            console.error('Error initializing charts:', error);
+        }
+    });
+
+    // High Stock Multiplier Handler
+    const multiplierSlider = document.getElementById('highStockMultiplier');
+    const multiplierValue = document.getElementById('multiplierValue');
+    const multiplierText = document.getElementById('multiplierText');
+
+    multiplierSlider?.addEventListener('input', async (e) => {
+        const value = e.target.value;
+        if (multiplierValue) multiplierValue.textContent = `${value}x`;
+        if (multiplierText) multiplierText.textContent = `${value}x`;
+        
+        try {
+            const response = await fetch(`/api/stock-stats?multiplier=${value}`);
+            if (!response.ok) throw new Error('Failed to update stats');
+            
+            const newStats = await response.json();
+            
+            // Update the stats in the UI
+            const statsElements = {
+                soldOut: document.querySelector('.text-red-700 .text-2xl'),
+                lowStock: document.querySelector('.text-orange-700 .text-2xl'),
+                mediumStock: document.querySelector('.text-green-700 .text-2xl'),
+                highStock: document.querySelector('.text-blue-700 .text-2xl')
+            };
+            
+            if (statsElements.soldOut) statsElements.soldOut.textContent = newStats.soldOut;
+            if (statsElements.lowStock) statsElements.lowStock.textContent = newStats.lowStock;
+            if (statsElements.mediumStock) statsElements.mediumStock.textContent = newStats.mediumStock;
+            if (statsElements.highStock) statsElements.highStock.textContent = newStats.highStock;
+            
+            // Update the chart
+            if (window.stockChart) {
+                window.stockChart.updateSeries([
+                    newStats.soldOut,
+                    newStats.lowStock,
+                    newStats.mediumStock,
+                    newStats.highStock
+                ]);
+            }
+        } catch (error) {
+            console.error('Failed to update stock stats:', error);
+        }
+    });
+</script> 

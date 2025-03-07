@@ -1,0 +1,51 @@
+---
+interface Props {
+  id: string;
+  title: string;
+}
+
+const { id, title } = Astro.props;
+---
+
+<div id={id} class="hidden fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 backdrop-blur-sm z-50">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-lg shadow-lg">
+      <!-- Header -->
+      <div class="flex items-center justify-between p-4 border-b dark:border-slate-800 border-slate-200">
+        <h3 class="text-lg font-semibold leading-6 dark:text-slate-50 text-slate-900">
+          {title}
+        </h3>
+        <button type="button" class="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300">
+          <span class="sr-only">Close</span>
+          <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      
+      <!-- Content -->
+      <div class="p-4">
+        <slot />
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Close modal when clicking outside
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (target.matches('[id$="Modal"]')) {
+      target.classList.add('hidden');
+    }
+  });
+
+  // Close modal when clicking close button
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button') && target.closest('[id$="Modal"]')) {
+      const modal = target.closest('[id$="Modal"]');
+      modal?.classList.add('hidden');
+    }
+  });
+</script> 

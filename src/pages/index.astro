@@ -1,0 +1,1232 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Modal from '../components/Modal.astro';
+import { db } from '../db';
+import { products } from '../db/schema';
+import { sql } from 'drizzle-orm';
+
+// Get initial products for first load
+const productList = await db.select()
+    .from(products)
+    .limit(20)
+    .all();
+
+// Get total count for initial pagination
+const [{ count }] = await db.select({ 
+    count: sql<number>`count(*)` 
+}).from(products).all();
+
+const totalPages = Math.ceil(count / 20);
+
+// Generate visible page numbers with ellipsis
+function getVisiblePageNumbers(current: number, total: number) {
+    const delta = 1; // Number of pages to show before and after current page
+    const pages: (number | string)[] = [];
+
+    // Always include first page
+    pages.push(1);
+
+    // Calculate range around current page
+    let rangeStart = Math.max(2, current - delta);
+    let rangeEnd = Math.min(total - 1, current + delta);
+
+    // Add ellipsis after first page if needed
+    if (rangeStart > 2) {
+        pages.push('...');
+    }
+
+    // Add pages around current page
+    for (let i = rangeStart; i <= rangeEnd; i++) {
+        pages.push(i);
+    }
+
+    // Add ellipsis before last page if needed
+    if (rangeEnd < total - 1) {
+        pages.push('...');
+    }
+
+    // Always include last page if there is more than one page
+    if (total > 1) {
+        pages.push(total);
+    }
+
+    return pages;
+}
+
+const visiblePageNumbers = getVisiblePageNumbers(1, totalPages);
+
+// Format currency for display
+function formatCurrency(value) {
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(value);
+}
+---
+
+<Layout title="Products">
+	<div class="min-h-screen transition-colors duration-300 dark:bg-slate-950 bg-slate-50">
+		<div class="px-4">
+			<!-- Header Section -->
+			<div class="py-4 border-b dark:border-slate-800 border-slate-200">
+				<div class="flex flex-col gap-4">
+					<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+						<h2 class="text-2xl font-bold tracking-tight dark:text-slate-50 text-slate-900">Products</h2>
+						<div class="flex flex-wrap gap-2">
+							<button id="importExcel" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 transition-colors">
+								Import
+							</button>
+							<button id="exportExcel" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-yellow-600 text-white hover:bg-yellow-700 dark:bg-yellow-600 dark:hover:bg-yellow-500 transition-colors">
+								Export
+							</button>
+							<button id="importDeductStock" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-orange-600 text-white hover:bg-orange-700 dark:bg-orange-600 dark:hover:bg-orange-500 transition-colors">
+								Import Deduct Stock
+							</button>
+							<button id="deleteAllProducts" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-500 transition-colors">
+								Delete All
+							</button>
+							<button id="openAddModal" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 transition-colors">
+								Add Product
+							</button>
+						</div>
+					</div>
+					<!-- Search Box -->
+					<form class="w-full sm:max-w-md" id="searchForm">
+						<div class="relative">
+							<input 
+								type="search" 
+								name="search" 
+								value=""
+								placeholder="Search products..." 
+								class="w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400 pl-10 pr-4 py-2"
+							/>
+							<div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+								<svg class="h-5 w-5 dark:text-slate-400 text-slate-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+									<path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
+								</svg>
+							</div>
+							<div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none hidden">
+								<svg class="animate-spin h-5 w-5 dark:text-slate-400 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+								</svg>
+							</div>
+						</div>
+					</form>
+				</div>
+			</div>
+
+			<!-- Hidden file inputs -->
+			<input type="file" id="excelFileInput" accept=".xlsx,.xls" class="hidden" />
+			<input type="file" id="deductStockFileInput" accept=".xlsx,.xls" class="hidden" />
+
+			<!-- Content Section -->
+			<div class="py-4">
+				<!-- Desktop Table View -->
+				<div class="hidden md:block overflow-x-auto rounded-lg border dark:border-slate-800 border-slate-200">
+					<table class="min-w-full divide-y dark:divide-slate-800 divide-slate-200">
+						<thead class="dark:bg-slate-900 bg-slate-100">
+							<tr>
+								<th class="px-4 py-3 text-left text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">Code</th>
+								<th class="px-4 py-3 text-left text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">Name</th>
+								<th class="px-4 py-3 text-left text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">UOM</th>
+								<th class="px-4 py-3 text-right text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">Price</th>
+								<th class="px-4 py-3 text-right text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">Stock</th>
+								<th class="px-4 py-3 text-right text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">Restock Level</th>
+								<th class="px-4 py-3 text-left text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">Location</th>
+								<th class="px-4 py-3 text-left text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">Supplier</th>
+								<th class="px-4 py-3 text-center text-xs font-medium dark:text-slate-400 text-slate-500 uppercase tracking-wider">Actions</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y dark:divide-slate-800 divide-slate-200 dark:bg-slate-900 bg-white">
+							{productList.map((product) => (
+								<tr class="dark:hover:bg-slate-800 hover:bg-slate-50" data-product-id={product.id}>
+									<td class="px-4 py-3 dark:text-slate-300">{product.code}</td>
+									<td class="px-4 py-3 dark:text-slate-300">{product.name}</td>
+									<td class="px-4 py-3 dark:text-slate-300">{product.uom}</td>
+									<td class="px-4 py-3 text-right dark:text-slate-300">{formatCurrency(product.price)}</td>
+									<td class="px-4 py-3 text-right dark:text-slate-300">{product.stock}</td>
+									<td class="px-4 py-3 text-right dark:text-slate-300">{product.restock_level}</td>
+									<td class="px-4 py-3 dark:text-slate-300">{product.stock_location || '-'}</td>
+									<td class="px-4 py-3 dark:text-slate-300">{product.supplied_by || '-'}</td>
+									<td class="px-4 py-3 text-center space-x-1">
+										<button class="text-green-500 hover:text-green-400 dark:text-green-400 dark:hover:text-green-300" data-add-stock-id={product.id} title="Add Stock">+</button>
+										<button class="text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300" data-remove-stock-id={product.id} title="Remove Stock">-</button>
+										<button class="text-blue-500 hover:text-blue-400 dark:text-blue-400 dark:hover:text-blue-300" data-edit-id={product.id}>Edit</button>
+										<button class="text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300" data-delete-id={product.id}>Delete</button>
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+
+				<!-- Mobile Card View -->
+				<div class="md:hidden space-y-4">
+					{productList.map((product) => (
+						<div class="dark:bg-slate-900 bg-white rounded-lg shadow-sm border dark:border-slate-800 border-slate-200 p-4" data-product-id={product.id}>
+							<div class="space-y-2">
+								<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+									<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Code</span>
+									<span class="text-sm dark:text-slate-300 text-slate-900">{product.code}</span>
+								</div>
+								<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+									<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Name</span>
+									<span class="text-sm dark:text-slate-300 text-slate-900">{product.name}</span>
+								</div>
+								<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+									<span class="text-sm font-medium dark:text-slate-400 text-slate-500">UOM</span>
+									<span class="text-sm dark:text-slate-300 text-slate-900">{product.uom}</span>
+								</div>
+								<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+									<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Price</span>
+									<span class="text-sm dark:text-slate-300 text-slate-900">{formatCurrency(product.price)}</span>
+								</div>
+								<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+									<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Stock</span>
+									<span class="text-sm dark:text-slate-300 text-slate-900">{product.stock}</span>
+								</div>
+								<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+									<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Restock Level</span>
+									<span class="text-sm dark:text-slate-300 text-slate-900">{product.restock_level}</span>
+								</div>
+								<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+									<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Location</span>
+									<span class="text-sm dark:text-slate-300 text-slate-900">{product.stock_location || '-'}</span>
+								</div>
+								<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+									<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Supplier</span>
+									<span class="text-sm dark:text-slate-300 text-slate-900">{product.supplied_by || '-'}</span>
+								</div>
+								{product.notes && (
+									<div class="border-b dark:border-slate-800 border-slate-200 pb-2">
+										<span class="block text-sm font-medium dark:text-slate-400 text-slate-500 mb-1">Notes</span>
+										<span class="block text-sm dark:text-slate-300 text-slate-900 whitespace-pre-wrap">{product.notes}</span>
+									</div>
+								)}
+								<div class="flex justify-end space-x-2 pt-2">
+									<button class="text-green-500 hover:text-green-400 dark:text-green-400 dark:hover:text-green-300 p-2" data-add-stock-id={product.id} title="Add Stock">
+										<span class="sr-only">Add Stock</span>
+										+
+									</button>
+									<button class="text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300 p-2" data-remove-stock-id={product.id} title="Remove Stock">
+										<span class="sr-only">Remove Stock</span>
+										-
+									</button>
+									<button class="text-blue-500 hover:text-blue-400 dark:text-blue-400 dark:hover:text-blue-300 p-2" data-edit-id={product.id}>
+										<span class="sr-only">Edit</span>
+										Edit
+									</button>
+									<button class="text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300 p-2" data-delete-id={product.id}>
+										<span class="sr-only">Delete</span>
+										Delete
+									</button>
+								</div>
+							</div>
+						</div>
+					))}
+				</div>
+
+				<!-- Pagination Controls -->
+				<div class="flex justify-center items-center py-4">
+					<nav class="inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+						<a href={`?page=${Math.max(1, 1 - 1)}`}
+							class={`relative inline-flex items-center px-3 py-2 text-sm font-medium rounded-l-md dark:bg-slate-900 bg-white border dark:border-slate-800 border-slate-200 dark:hover:bg-slate-800 hover:bg-slate-50 ${
+								1 === 1 
+									? 'opacity-50 cursor-not-allowed dark:text-slate-600 text-slate-400' 
+									: 'dark:text-slate-300 text-slate-900'
+							}`}
+							aria-disabled={1 === 1}>
+							<span class="sr-only">Previous</span>
+							<svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+								<path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+							</svg>
+						</a>
+						
+						{visiblePageNumbers.map((pageNum) => (
+							pageNum === '...' ? (
+								<span class="relative inline-flex items-center px-4 py-2 text-sm font-medium dark:bg-slate-900 bg-white border dark:border-slate-800 border-slate-200 dark:text-slate-500 text-slate-700">
+									...
+								</span>
+							) : (
+								<a href={`?page=${pageNum}`}
+									class={`relative inline-flex items-center px-4 py-2 text-sm font-medium border ${
+										1 === pageNum 
+											? 'z-10 bg-blue-600 dark:bg-blue-700 text-white border-blue-600 dark:border-blue-700' 
+											: 'dark:bg-slate-900 bg-white dark:text-slate-300 text-slate-900 dark:border-slate-800 border-slate-200 dark:hover:bg-slate-800 hover:bg-slate-50'
+									}`}>
+									{pageNum}
+								</a>
+							)
+						))}
+						
+						<a href={`?page=${Math.min(totalPages, 1 + 1)}`}
+							class={`relative inline-flex items-center px-3 py-2 text-sm font-medium rounded-r-md dark:bg-slate-900 bg-white border dark:border-slate-800 border-slate-200 dark:hover:bg-slate-800 hover:bg-slate-50 ${
+							1 === totalPages 
+									? 'opacity-50 cursor-not-allowed dark:text-slate-600 text-slate-400' 
+									: 'dark:text-slate-300 text-slate-900'
+							}`}
+							aria-disabled={1 === totalPages}>
+							<span class="sr-only">Next</span>
+							<svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+								<path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+							</svg>
+						</a>
+					</nav>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Add Product Modal -->
+	<Modal id="addProductModal" title="Add New Product">
+		<div class="max-h-[calc(100vh-200px)] overflow-y-auto">
+			<form id="addProductForm" class="space-y-4">
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Product Code</label>
+					<input type="text" name="code" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Name</label>
+					<input type="text" name="name" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">UOM</label>
+					<input type="text" name="uom" required placeholder="e.g., pcs, kg, l, m"
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Price</label>
+					<input type="number" name="price" step="0.01" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Initial Stock</label>
+					<input type="number" name="stock" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Restock Level</label>
+					<input type="number" name="restock_level" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Stock Location</label>
+					<input type="text" name="stock_location" placeholder="e.g., Warehouse A, Shelf B3"
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Supplied By</label>
+					<input type="text" name="supplied_by" placeholder="Supplier name or company"
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Notes</label>
+					<textarea name="notes" rows="3" placeholder="Additional information about the product"
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400"></textarea>
+				</div>
+				
+				<div class="flex justify-end space-x-3">
+					<button type="button" id="cancelAdd"
+						class="px-4 py-2 text-sm font-medium bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600">
+						Cancel
+					</button>
+					<button type="submit"
+						class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500">
+						Create Product
+					</button>
+				</div>
+			</form>
+		</div>
+	</Modal>
+
+	<!-- Edit Product Modal -->
+	<Modal id="editProductModal" title="Edit Product">
+		<div class="max-h-[calc(100vh-200px)] overflow-y-auto">
+			<form id="editProductForm" class="space-y-4">
+				<input type="hidden" name="id" />
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Product Code</label>
+					<input type="text" name="code" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Name</label>
+					<input type="text" name="name" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">UOM</label>
+					<input type="text" name="uom" required placeholder="e.g., pcs, kg, l, m"
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Price</label>
+					<input type="number" name="price" step="0.01" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Stock</label>
+					<input type="number" name="stock" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+				
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Restock Level</label>
+					<input type="number" name="restock_level" required
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Stock Location</label>
+					<input type="text" name="stock_location" placeholder="e.g., Warehouse A, Shelf B3"
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Supplied By</label>
+					<input type="text" name="supplied_by" placeholder="Supplier name or company"
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Notes</label>
+					<textarea name="notes" rows="3" placeholder="Additional information about the product"
+						class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400"></textarea>
+				</div>
+				
+				<div class="flex justify-end space-x-3">
+					<button type="button" id="cancelEdit"
+						class="px-4 py-2 text-sm font-medium bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600">
+						Cancel
+					</button>
+					<button type="submit"
+						class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500">
+						Update Product
+					</button>
+				</div>
+			</form>
+		</div>
+	</Modal>
+
+	<!-- Stock Adjustment Modal -->
+	<Modal id="stockAdjustModal" title="Adjust Stock">
+		<form id="stockAdjustForm" class="space-y-4">
+			<input type="hidden" name="id" />
+			<input type="hidden" name="action" />
+			<div>
+				<label class="block text-sm font-medium dark:text-slate-300 text-slate-700">Quantity</label>
+				<input type="number" name="quantity" required min="1"
+					class="mt-1 block w-full rounded-md dark:bg-slate-800 bg-white border dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:focus:border-blue-400 dark:focus:ring-blue-400" />
+			</div>
+			
+			<div class="flex justify-end space-x-3">
+				<button type="button" id="cancelStockAdjust"
+					class="px-4 py-2 text-sm font-medium bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600">
+					Cancel
+				</button>
+				<button type="submit"
+					class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500">
+					Adjust Stock
+				</button>
+			</div>
+		</form>
+	</Modal>
+</Layout>
+
+<script>
+	// Import xlsx library
+	import * as XLSX from 'xlsx';
+
+	// Search form handling
+	const searchForm = document.getElementById('searchForm');
+	const searchInput = searchForm?.querySelector('input[type="search"]') as HTMLInputElement;
+	let searchTimeout: number | null = null;
+	const desktopTableBody = document.querySelector('.md\\:block tbody');
+	const mobileCardContainer = document.querySelector('.md\\:hidden');
+	const paginationContainer = document.querySelector('.pagination');
+
+	// Function to normalize search term
+	function normalizeSearchTerm(term: string) {
+		return term.trim();
+	}
+
+	// Function to update pagination UI
+	function updatePaginationUI(pagination: { currentPage: number; totalPages: number }) {
+		if (!paginationContainer) return;
+
+		const maxVisiblePages = 5;
+		let paginationHTML = '';
+
+		// Previous button
+		paginationHTML += `
+			<button class="pagination-btn ${pagination.currentPage === 1 ? 'disabled' : ''}" 
+				data-page="${pagination.currentPage - 1}"
+				${pagination.currentPage === 1 ? 'disabled' : ''}>
+				Previous
+			</button>
+		`;
+
+		// Calculate visible page range
+		let startPage = Math.max(1, pagination.currentPage - Math.floor(maxVisiblePages / 2));
+		let endPage = Math.min(pagination.totalPages, startPage + maxVisiblePages - 1);
+
+		// Adjust start if we're near the end
+		if (endPage - startPage + 1 < maxVisiblePages) {
+			startPage = Math.max(1, endPage - maxVisiblePages + 1);
+		}
+
+		// First page and ellipsis
+		if (startPage > 1) {
+			paginationHTML += `<button class="pagination-btn" data-page="1">1</button>`;
+			if (startPage > 2) paginationHTML += '<span>...</span>';
+		}
+
+		// Page numbers
+		for (let i = startPage; i <= endPage; i++) {
+			paginationHTML += `
+				<button class="pagination-btn ${i === pagination.currentPage ? 'active' : ''}" 
+					data-page="${i}">
+					${i}
+				</button>
+			`;
+		}
+
+		// Last page and ellipsis
+		if (endPage < pagination.totalPages) {
+			if (endPage < pagination.totalPages - 1) paginationHTML += '<span>...</span>';
+			paginationHTML += `<button class="pagination-btn" data-page="${pagination.totalPages}">${pagination.totalPages}</button>`;
+		}
+
+		// Next button
+		paginationHTML += `
+			<button class="pagination-btn ${pagination.currentPage === pagination.totalPages ? 'disabled' : ''}" 
+				data-page="${pagination.currentPage + 1}"
+				${pagination.currentPage === pagination.totalPages ? 'disabled' : ''}>
+				Next
+			</button>
+		`;
+
+		paginationContainer.innerHTML = paginationHTML;
+
+		// Add event listeners to pagination buttons
+		paginationContainer.querySelectorAll('.pagination-btn').forEach(button => {
+			button.addEventListener('click', (e) => {
+				e.preventDefault();
+				const pageBtn = e.target as HTMLButtonElement;
+				if (!pageBtn.disabled) {
+					performSearch(searchInput.value, Number(pageBtn.dataset.page));
+				}
+			});
+		});
+	}
+
+	// Function to perform search
+	async function performSearch(query: string, page: number = 1) {
+		try {
+			const searchContainer = searchInput.parentElement;
+			const loadingIndicator = searchContainer?.querySelector('.animate-spin')?.parentElement;
+			
+			// Show loading indicator
+			loadingIndicator?.classList.remove('hidden');
+
+			const response = await fetch(`/api/products/search?q=${encodeURIComponent(query)}&page=${page}`);
+			if (!response.ok) throw new Error('Search failed');
+
+			const data = await response.json();
+			
+			// Update table/cards with new data
+			if (desktopTableBody) {
+				desktopTableBody.innerHTML = '';
+				data.products.forEach(product => {
+					const row = createTableRow(product);
+					desktopTableBody.appendChild(row);
+				});
+			}
+
+			if (mobileCardContainer) {
+				mobileCardContainer.innerHTML = '';
+				data.products.forEach(product => {
+					const card = createMobileCard(product);
+					mobileCardContainer.appendChild(card);
+				});
+			}
+
+			// Update pagination
+			updatePaginationUI(data.pagination);
+
+			// Hide loading indicator
+			loadingIndicator?.classList.add('hidden');
+		} catch (error) {
+			console.error('Search error:', error);
+			// Hide loading indicator
+			const loadingIndicator = searchInput.parentElement?.querySelector('.animate-spin')?.parentElement;
+			loadingIndicator?.classList.add('hidden');
+		}
+	}
+
+	// Search input handler
+	searchInput?.addEventListener('input', (e) => {
+		const target = e.target as HTMLInputElement;
+		
+		// Clear previous timeout
+		if (searchTimeout) {
+			clearTimeout(searchTimeout);
+		}
+
+		const value = normalizeSearchTerm(target.value);
+		
+		// Set new timeout
+		searchTimeout = window.setTimeout(() => {
+			if (value.length >= 2 || value.length === 0) {
+				performSearch(value);
+			}
+		}, 500);
+	});
+
+	// Handle form submission
+	searchForm?.addEventListener('submit', (e) => {
+		e.preventDefault();
+		const value = normalizeSearchTerm(searchInput.value);
+
+		if (value.length >= 2 || value.length === 0) {
+			performSearch(value);
+		}
+	});
+
+	// Initial search if there's a value in the search input
+	if (searchInput?.value) {
+		performSearch(searchInput.value);
+	}
+
+	// Add Product Modal
+	const addModal = document.getElementById('addProductModal');
+	const openAddButton = document.getElementById('openAddModal');
+	const cancelAddButton = document.getElementById('cancelAdd');
+	const addForm = document.getElementById('addProductForm');
+
+	// Edit Product Modal
+	const editModal = document.getElementById('editProductModal');
+	const cancelEditButton = document.getElementById('cancelEdit');
+	const editForm = document.getElementById('editProductForm') as HTMLFormElement;
+
+	// Import functionality
+	const importButton = document.getElementById('importExcel');
+	const exportButton = document.getElementById('exportExcel');
+	const fileInput = document.getElementById('excelFileInput') as HTMLInputElement;
+
+	// Stock Adjustment Modal
+	const stockAdjustModal = document.getElementById('stockAdjustModal');
+	const stockAdjustForm = document.getElementById('stockAdjustForm') as HTMLFormElement;
+	const cancelStockAdjustButton = document.getElementById('cancelStockAdjust');
+
+	// Import and Deduct Stock functionality
+	const importDeductStockButton = document.getElementById('importDeductStock');
+	const deductStockFileInput = document.getElementById('deductStockFileInput') as HTMLInputElement;
+
+	// Add Product Handlers
+	openAddButton?.addEventListener('click', () => {
+		addModal?.classList.remove('hidden');
+	});
+
+	cancelAddButton?.addEventListener('click', () => {
+		addModal?.classList.add('hidden');
+		addForm?.reset();
+	});
+
+	// Edit Product Handlers
+	document.addEventListener('click', async (e) => {
+		const target = e.target as HTMLElement;
+		if (target.matches('[data-edit-id]')) {
+			const id = target.dataset.editId;
+			try {
+				const response = await fetch(`/api/products/${id}`);
+				if (!response.ok) throw new Error('Failed to fetch product');
+				
+				const product = await response.json();
+				editForm.elements.namedItem('id').value = product.id;
+				editForm.elements.namedItem('code').value = product.code;
+				editForm.elements.namedItem('name').value = product.name;
+				editForm.elements.namedItem('uom').value = product.uom;
+				editForm.elements.namedItem('price').value = product.price;
+				editForm.elements.namedItem('stock').value = product.stock;
+				editForm.elements.namedItem('restock_level').value = product.restock_level;
+				editForm.elements.namedItem('stock_location').value = product.stock_location || '';
+				editForm.elements.namedItem('supplied_by').value = product.supplied_by || '';
+				editForm.elements.namedItem('notes').value = product.notes || '';
+				
+				editModal?.classList.remove('hidden');
+			} catch (error) {
+				console.error('Error fetching product:', error);
+				alert('Failed to load product details');
+			}
+		}
+	});
+
+	cancelEditButton?.addEventListener('click', () => {
+		editModal?.classList.add('hidden');
+		editForm?.reset();
+	});
+
+	// Form Submissions
+	addForm?.addEventListener('submit', async (e) => {
+		e.preventDefault();
+		const submitButton = addForm.querySelector('button[type="submit"]');
+		if (submitButton) {
+			submitButton.disabled = true;
+			submitButton.textContent = 'Creating...';
+		}
+
+		try {
+			const formData = new FormData(e.target as HTMLFormElement);
+			const data = Object.fromEntries(formData);
+
+			// Convert numeric fields
+			data.price = parseFloat(data.price as string);
+			data.stock = parseInt(data.stock as string);
+			data.restock_level = parseInt(data.restock_level as string);
+
+			// Remove empty optional fields
+			if (!data.stock_location) delete data.stock_location;
+			if (!data.supplied_by) delete data.supplied_by;
+			if (!data.notes) delete data.notes;
+
+			const response = await fetch('/api/products', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify(data),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.details || 'Failed to create product');
+			}
+
+			const product = await response.json();
+			addProductToUI(product);
+			addModal?.classList.add('hidden');
+			addForm?.reset();
+		} catch (error) {
+			console.error('Failed to create product:', error);
+			alert(error instanceof Error ? error.message : 'Failed to create product');
+		} finally {
+			if (submitButton) {
+				submitButton.disabled = false;
+				submitButton.textContent = 'Create Product';
+			}
+		}
+	});
+
+	editForm?.addEventListener('submit', async (e) => {
+		e.preventDefault();
+		const submitButton = editForm.querySelector('button[type="submit"]');
+		if (submitButton) {
+			submitButton.disabled = true;
+			submitButton.textContent = 'Updating...';
+		}
+
+		try {
+			const formData = new FormData(e.target as HTMLFormElement);
+			const data = Object.fromEntries(formData);
+			const id = data.id;
+			delete data.id;
+
+			// Convert numeric fields
+			data.price = parseFloat(data.price as string);
+			data.stock = parseInt(data.stock as string);
+			data.restock_level = parseInt(data.restock_level as string);
+
+			// Remove empty optional fields
+			if (!data.stock_location) delete data.stock_location;
+			if (!data.supplied_by) delete data.supplied_by;
+			if (!data.notes) delete data.notes;
+
+			const response = await fetch(`/api/products/${id}`, {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify(data),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.details || 'Failed to update product');
+			}
+
+			const product = await response.json();
+			updateProductInUI(product);
+			editModal?.classList.add('hidden');
+			editForm?.reset();
+		} catch (error) {
+			console.error('Failed to update product:', error);
+			alert(error instanceof Error ? error.message : 'Failed to update product');
+		} finally {
+			if (submitButton) {
+				submitButton.disabled = false;
+				submitButton.textContent = 'Update Product';
+			}
+		}
+	});
+
+	// Delete Handler
+	document.addEventListener('click', async (e) => {
+		const target = e.target as HTMLElement;
+		if (target.matches('[data-delete-id]')) {
+			if (confirm('Are you sure you want to delete this product?')) {
+				const id = target.dataset.deleteId;
+				const response = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+				if (response.ok) {
+					removeProductFromUI(id);
+				}
+			}
+		}
+	});
+
+	// Export functionality
+	exportButton?.addEventListener('click', () => {
+		const rows = Array.from(desktopTableBody?.querySelectorAll('tr') || []);
+		const data = rows.map(row => ({
+			code: row.cells[0].textContent,
+			name: row.cells[1].textContent,
+			uom: row.cells[2].textContent,
+			price: parseFloat(row.cells[3].textContent?.replace('$', '') || '0'),
+			stock: parseInt(row.cells[4].textContent || '0'),
+			restock_level: parseInt(row.cells[5].textContent || '0')
+		}));
+
+		const worksheet = XLSX.utils.json_to_sheet(data);
+		const workbook = XLSX.utils.book_new();
+		XLSX.utils.book_append_sheet(workbook, worksheet, 'Products');
+		
+		// Generate file name with current date
+		const date = new Date().toISOString().split('T')[0];
+		const fileName = `inventory_${date}.xlsx`;
+		
+		XLSX.writeFile(workbook, fileName);
+	});
+
+	// Import functionality
+	importButton?.addEventListener('click', () => {
+		fileInput?.click();
+	});
+
+	fileInput?.addEventListener('change', async (e) => {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+
+		try {
+			const data = await file.arrayBuffer();
+			const workbook = XLSX.read(data);
+			const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+			const products = XLSX.utils.sheet_to_json(worksheet);
+
+			// Show loading state
+			importButton!.disabled = true;
+			importButton!.textContent = 'Importing...';
+
+			let successCount = 0;
+			let errorCount = 0;
+			const errors = [];
+
+			// Import each product
+			for (const rawProduct of products) {
+				try {
+					// Validate and format the product data
+					const product = {
+						code: String(rawProduct.code || '').trim(),
+						name: String(rawProduct.name || '').trim(),
+						uom: String(rawProduct.uom || '').trim(),
+						price: Number(rawProduct.price || 0),
+						stock: Number(rawProduct.stock || 0),
+						restock_level: Number(rawProduct.restock_level || rawProduct.restock_level || 0)
+					};
+
+					// Basic validation
+					if (!product.code) throw new Error('Product code is required');
+					if (!product.name) throw new Error('Product name is required');
+					if (!product.uom) throw new Error('UOM is required');
+					if (isNaN(product.price) || product.price < 0) throw new Error('Invalid price');
+					if (isNaN(product.stock) || product.stock < 0) throw new Error('Invalid stock');
+					if (isNaN(product.restock_level) || product.restock_level < 0) throw new Error('Invalid restock level');
+
+					const response = await fetch('/api/products', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: JSON.stringify(product),
+					});
+
+					if (!response.ok) {
+						const errorData = await response.json();
+						throw new Error(errorData.details || 'Failed to import product');
+					}
+
+					const newProduct = await response.json();
+					addProductToUI(newProduct);
+					successCount++;
+				} catch (error) {
+					errorCount++;
+					errors.push(`Product ${rawProduct.code || 'unknown'}: ${error.message}`);
+					console.error('Import error for product:', rawProduct, error);
+				}
+			}
+
+			// Show import results
+			if (successCount > 0) {
+				alert(`Successfully imported ${successCount} products.${errorCount > 0 ? `\n\nFailed to import ${errorCount} products.\nCheck console for details.` : ''}`);
+			} else {
+				alert(`Failed to import any products.\nErrors:\n${errors.join('\n')}`);
+			}
+		} catch (error) {
+			console.error('Import error:', error);
+			alert(error instanceof Error ? error.message : 'Failed to import products');
+		} finally {
+			// Reset input and button state
+			fileInput.value = '';
+			importButton!.disabled = false;
+			importButton!.textContent = 'Import Excel';
+		}
+	});
+
+	// Stock Adjustment Handlers
+	document.addEventListener('click', async (e) => {
+		const target = e.target as HTMLElement;
+		if (target.matches('[data-add-stock-id], [data-remove-stock-id]')) {
+			const id = target.dataset.addStockId || target.dataset.removeStockId;
+			const action = target.dataset.addStockId ? 'add' : 'remove';
+			
+			stockAdjustForm.elements.namedItem('id').value = id;
+			stockAdjustForm.elements.namedItem('action').value = action;
+			stockAdjustForm.elements.namedItem('quantity').value = '1';
+			
+			const title = document.querySelector('#stockAdjustModal h3');
+			if (title) {
+				title.textContent = `${action === 'add' ? 'Add' : 'Remove'} Stock`;
+			}
+			
+			stockAdjustModal?.classList.remove('hidden');
+		}
+	});
+
+	cancelStockAdjustButton?.addEventListener('click', () => {
+		stockAdjustModal?.classList.add('hidden');
+		stockAdjustForm?.reset();
+	});
+
+	stockAdjustForm?.addEventListener('submit', async (e) => {
+		e.preventDefault();
+		const submitButton = stockAdjustForm.querySelector('button[type="submit"]');
+		if (submitButton) {
+			submitButton.disabled = true;
+			submitButton.textContent = 'Adjusting...';
+		}
+
+		try {
+			const formData = new FormData(e.target as HTMLFormElement);
+			const id = formData.get('id');
+			const action = formData.get('action');
+			const quantity = parseInt(formData.get('quantity') as string);
+
+			const response = await fetch(`/api/products/${id}/stock`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					action,
+					quantity
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.details || 'Failed to adjust stock');
+			}
+
+			const product = await response.json();
+			updateProductInUI(product);
+			stockAdjustModal?.classList.add('hidden');
+			stockAdjustForm?.reset();
+		} catch (error) {
+			console.error('Failed to adjust stock:', error);
+			alert(error instanceof Error ? error.message : 'Failed to adjust stock');
+		} finally {
+			if (submitButton) {
+				submitButton.disabled = false;
+				submitButton.textContent = 'Adjust Stock';
+			}
+		}
+	});
+
+	// Import and Deduct Stock functionality
+	importDeductStockButton?.addEventListener('click', () => {
+		deductStockFileInput?.click();
+	});
+
+	deductStockFileInput?.addEventListener('change', async (e) => {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+
+		try {
+			const data = await file.arrayBuffer();
+			const workbook = XLSX.read(data);
+			const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+			const adjustments = XLSX.utils.sheet_to_json(worksheet);
+
+			// Show loading state
+			importDeductStockButton!.disabled = true;
+			importDeductStockButton!.textContent = 'Processing...';
+
+			let successCount = 0;
+			let errorCount = 0;
+			const errors = [];
+
+			// Process each adjustment
+			for (const adjustment of adjustments) {
+				try {
+					// Validate the adjustment data
+					const productCode = String(adjustment.product_code || '').trim();
+					const deductQuantity = Number(adjustment.adjustment || 0);
+
+					// Basic validation
+					if (!productCode) throw new Error('Product code is required');
+					if (isNaN(deductQuantity) || deductQuantity <= 0) {
+						throw new Error('Invalid deduction quantity - must be a positive number');
+					}
+
+					const response = await fetch(`/api/products/deduct-stock`, {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: JSON.stringify({
+							product_code: productCode,
+							quantity: deductQuantity
+						}),
+					});
+
+					if (!response.ok) {
+						const errorData = await response.json();
+						throw new Error(errorData.details || 'Failed to deduct stock');
+					}
+
+					const updatedProduct = await response.json();
+					updateProductInUI(updatedProduct);
+					successCount++;
+				} catch (error) {
+					errorCount++;
+					errors.push(`Product ${adjustment.product_code || 'unknown'}: ${error.message}`);
+					console.error('Stock deduction error for product:', adjustment, error);
+				}
+			}
+
+			// Show results
+			if (successCount > 0) {
+				alert(`Successfully processed ${successCount} stock deductions.${errorCount > 0 ? `\n\nFailed to process ${errorCount} deductions.\nCheck console for details.` : ''}`);
+			} else {
+				alert(`Failed to process any stock deductions.\nErrors:\n${errors.join('\n')}`);
+			}
+		} catch (error) {
+			console.error('Import error:', error);
+			alert(error instanceof Error ? error.message : 'Failed to process stock deductions');
+		} finally {
+			// Reset input and button state
+			deductStockFileInput.value = '';
+			importDeductStockButton!.disabled = false;
+			importDeductStockButton!.textContent = 'Import Deduct Stock';
+		}
+	});
+
+	function createTableRow(product) {
+		const tr = document.createElement('tr');
+		tr.className = 'dark:hover:bg-slate-800 hover:bg-slate-50';
+		tr.dataset.productId = product.id.toString();
+		tr.innerHTML = `
+			<td class="px-4 py-3 dark:text-slate-300 text-slate-900">${product.code}</td>
+			<td class="px-4 py-3 dark:text-slate-300 text-slate-900">${product.name}</td>
+			<td class="px-4 py-3 dark:text-slate-300 text-slate-900">${product.uom}</td>
+			<td class="px-4 py-3 text-right dark:text-slate-300 text-slate-900">${formatCurrency(product.price)}</td>
+			<td class="px-4 py-3 text-right dark:text-slate-300 text-slate-900">${product.stock}</td>
+			<td class="px-4 py-3 text-right dark:text-slate-300 text-slate-900">${product.restock_level}</td>
+			<td class="px-4 py-3 dark:text-slate-300">${product.stock_location || '-'}</td>
+			<td class="px-4 py-3 dark:text-slate-300">${product.supplied_by || '-'}</td>
+			<td class="px-4 py-3 text-center space-x-1">
+				<button class="text-green-500 hover:text-green-400 dark:text-green-400 dark:hover:text-green-300" data-add-stock-id="${product.id}" title="Add Stock">+</button>
+				<button class="text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300" data-remove-stock-id="${product.id}" title="Remove Stock">-</button>
+				<button class="text-blue-500 hover:text-blue-400 dark:text-blue-400 dark:hover:text-blue-300" data-edit-id="${product.id}">Edit</button>
+				<button class="text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300" data-delete-id="${product.id}">Delete</button>
+			</td>
+		`;
+		return tr;
+	}
+
+	function createMobileCard(product) {
+		const div = document.createElement('div');
+		div.className = 'dark:bg-slate-900 bg-white rounded-lg shadow-sm border dark:border-slate-800 border-slate-200 p-4';
+		div.dataset.productId = product.id.toString();
+		div.innerHTML = `
+			<div class="space-y-2">
+				<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+					<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Code</span>
+					<span class="text-sm dark:text-slate-300 text-slate-900">${product.code}</span>
+				</div>
+				<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+					<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Name</span>
+					<span class="text-sm dark:text-slate-300 text-slate-900">${product.name}</span>
+				</div>
+				<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+					<span class="text-sm font-medium dark:text-slate-400 text-slate-500">UOM</span>
+					<span class="text-sm dark:text-slate-300 text-slate-900">${product.uom}</span>
+				</div>
+				<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+					<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Price</span>
+					<span class="text-sm dark:text-slate-300 text-slate-900">${formatCurrency(product.price)}</span>
+				</div>
+				<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+					<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Stock</span>
+					<span class="text-sm dark:text-slate-300 text-slate-900">${product.stock}</span>
+				</div>
+				<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+					<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Restock Level</span>
+					<span class="text-sm dark:text-slate-300 text-slate-900">${product.restock_level}</span>
+				</div>
+				<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+					<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Location</span>
+					<span class="text-sm dark:text-slate-300 text-slate-900">${product.stock_location || '-'}</span>
+				</div>
+				<div class="flex justify-between border-b dark:border-slate-800 border-slate-200 pb-2">
+					<span class="text-sm font-medium dark:text-slate-400 text-slate-500">Supplier</span>
+					<span class="text-sm dark:text-slate-300 text-slate-900">${product.supplied_by || '-'}</span>
+				</div>
+				${product.notes ? `
+					<div class="border-b dark:border-slate-800 border-slate-200 pb-2">
+						<span class="block text-sm font-medium dark:text-slate-400 text-slate-500 mb-1">Notes</span>
+						<span class="block text-sm dark:text-slate-300 text-slate-900 whitespace-pre-wrap">${product.notes}</span>
+					</div>
+				` : ''}
+				<div class="flex justify-end space-x-2 pt-2">
+					<button class="text-green-500 hover:text-green-400 dark:text-green-400 dark:hover:text-green-300 p-2" data-add-stock-id="${product.id}" title="Add Stock">
+						<span class="sr-only">Add Stock</span>
+						+
+					</button>
+					<button class="text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300 p-2" data-remove-stock-id="${product.id}" title="Remove Stock">
+						<span class="sr-only">Remove Stock</span>
+						-
+					</button>
+					<button class="text-blue-500 hover:text-blue-400 dark:text-blue-400 dark:hover:text-blue-300 p-2" data-edit-id="${product.id}">
+						<span class="sr-only">Edit</span>
+						Edit
+					</button>
+					<button class="text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300 p-2" data-delete-id="${product.id}">
+						<span class="sr-only">Delete</span>
+						Delete
+					</button>
+				</div>
+			</div>
+		`;
+		return div;
+	}
+
+	// Function to update product in UI
+	function updateProductInUI(product) {
+		// Update in desktop view
+		const desktopRow = desktopTableBody?.querySelector(`tr[data-product-id="${product.id}"]`);
+		if (desktopRow) {
+			const newRow = createTableRow(product);
+			desktopRow.replaceWith(newRow);
+		}
+
+		// Update in mobile view
+		const mobileCard = mobileCardContainer?.querySelector(`div[data-product-id="${product.id}"]`);
+		if (mobileCard) {
+			const newCard = createMobileCard(product);
+			mobileCard.replaceWith(newCard);
+		}
+	}
+
+	// Function to add product to UI
+	function addProductToUI(product) {
+		// Add to desktop view
+		if (desktopTableBody) {
+			const row = createTableRow(product);
+			desktopTableBody.appendChild(row);
+		}
+
+		// Add to mobile view
+		if (mobileCardContainer) {
+			const card = createMobileCard(product);
+			mobileCardContainer.appendChild(card);
+		}
+	}
+
+	// Function to remove product from UI
+	function removeProductFromUI(productId) {
+		// Remove from desktop view
+		const desktopRow = desktopTableBody?.querySelector(`tr[data-product-id="${productId}"]`);
+		if (desktopRow) {
+			desktopRow.remove();
+		}
+
+		// Remove from mobile view
+		const mobileCard = mobileCardContainer?.querySelector(`div[data-product-id="${productId}"]`);
+		if (mobileCard) {
+			mobileCard.remove();
+		}
+	}
+
+	// Delete All Products Handler
+	const deleteAllButton = document.getElementById('deleteAllProducts');
+	deleteAllButton?.addEventListener('click', async () => {
+		const confirmMessage = 'WARNING: This action will permanently delete ALL products.\n\nPlease type "DELETE ALL" to confirm:';
+		const userInput = prompt(confirmMessage);
+
+		if (userInput === 'DELETE ALL') {
+			try {
+				const response = await fetch('/api/products/delete-all', {
+					method: 'DELETE',
+					headers: {
+						'Content-Type': 'application/json'
+					}
+				});
+
+				if (!response.ok) {
+					throw new Error('Failed to delete all products');
+				}
+
+				// Clear the UI
+				if (desktopTableBody) {
+					desktopTableBody.innerHTML = '';
+				}
+				if (mobileCardContainer) {
+					mobileCardContainer.innerHTML = '';
+				}
+
+				alert('All products have been deleted successfully.');
+				window.location.reload(); // Refresh the page to update counts and pagination
+			} catch (error) {
+				console.error('Error deleting all products:', error);
+				alert('Failed to delete all products. Please try again.');
+			}
+		} else if (userInput !== null) {
+			alert('Incorrect confirmation text. Operation cancelled.');
+		}
+	});
+</script>

@@ -1,0 +1,82 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../db';
+import { products } from '../../db/schema';
+
+if (Astro.request.method === 'POST') {
+  try {
+    const formData = await Astro.request.formData();
+    const productData = {
+      code: formData.get('code') as string,
+      name: formData.get('name') as string,
+      uom: formData.get('uom') as string,
+      price: Number(formData.get('price')),
+      stock: Number(formData.get('stock')),
+      restockLevel: Number(formData.get('restockLevel')),
+    };
+
+    await db.insert(products).values(productData);
+    return Astro.redirect('/');
+  } catch (error) {
+    console.error('Failed to create product:', error);
+  }
+}
+---
+
+<Layout title="New Product">
+  <div class="max-w-lg mx-auto">
+    <h2 class="text-2xl font-bold mb-4">Add New Product</h2>
+    <form method="POST" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Product Code</label>
+        <input type="text" name="code" required
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+      </div>
+      
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Name</label>
+        <input type="text" name="name" required
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+      </div>
+      
+      <div>
+        <label class="block text-sm font-medium text-gray-700">UOM</label>
+        <select name="uom" required
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+          <option value="pcs">Pieces</option>
+          <option value="kg">Kilograms</option>
+          <option value="l">Liters</option>
+          <option value="m">Meters</option>
+        </select>
+      </div>
+      
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Price</label>
+        <input type="number" name="price" step="0.01" required
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+      </div>
+      
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Initial Stock</label>
+        <input type="number" name="stock" required
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+      </div>
+      
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Restock Level</label>
+        <input type="number" name="restockLevel" required
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+      </div>
+      
+      <div class="flex justify-end space-x-3">
+        <a href="/" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">
+          Cancel
+        </a>
+        <button type="submit"
+          class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
+          Create Product
+        </button>
+      </div>
+    </form>
+  </div>
+</Layout> 
