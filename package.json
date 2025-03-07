@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "start": "node ./dist/server/entry.mjs",
-    "build": "astro build",
+    "build": "npx astro build",
     "preview": "astro preview",
     "astro": "astro",
     "vercel-build": "astro build"

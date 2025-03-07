@@ -7,15 +7,10 @@ import vercel from '@astrojs/vercel/serverless';
 export default defineConfig({
   output: 'server',
   adapter: vercel({
+    includeFiles: ['./dist/**'],
     webAnalytics: {
       enabled: true
-    },
-    imageService: true
-  }),
-  integrations: [tailwind()],
-  vite: {
-    ssr: {
-      noExternal: ['drizzle-orm']
     }
-  }
+  }),
+  integrations: [tailwind()]
 });
