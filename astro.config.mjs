@@ -11,7 +11,12 @@ export default defineConfig({
   }),
   vite: {
     ssr: {
-      noExternal: ['xlsx']
+      noExternal: [
+        'xlsx',
+        'drizzle-orm',
+        'postgres',
+        '@neondatabase/serverless'
+      ]
     }
   },
   integrations: [tailwind()]
