@@ -7,12 +7,7 @@ import vercel from '@astrojs/vercel/serverless';
 export default defineConfig({
   output: 'server',
   adapter: vercel({
-    maxDuration: 60,
-    includeFiles: ['./dist/**/*'],
-    excludeFiles: ['**/node_modules/**'],
-    webAnalytics: {
-      enabled: true
-    }
+    maxDuration: 60
   }),
   vite: {
     ssr: {
