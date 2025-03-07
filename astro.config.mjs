@@ -9,7 +9,15 @@ export default defineConfig({
   adapter: vercel({
     maxDuration: 60,
     includeFiles: ['./dist/**/*'],
-    excludeFiles: ['**/node_modules/**']
+    excludeFiles: ['**/node_modules/**'],
+    webAnalytics: {
+      enabled: true
+    }
   }),
+  vite: {
+    ssr: {
+      noExternal: ['xlsx']
+    }
+  },
   integrations: [tailwind()]
 });

@@ -2,5 +2,11 @@
   "buildCommand": "node ./node_modules/astro/astro.js build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "framework": null
+  "framework": null,
+  "functions": {
+    "api/**/*": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  }
 } 
