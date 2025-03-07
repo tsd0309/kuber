@@ -5,10 +5,9 @@
   "scripts": {
     "dev": "astro dev",
     "start": "node ./dist/server/entry.mjs",
-    "build": "npx astro build",
+    "build": "node ./node_modules/astro/astro.js build",
     "preview": "astro preview",
-    "astro": "astro",
-    "vercel-build": "astro build"
+    "astro": "astro"
   },
   "dependencies": {
     "@astrojs/node": "^9.1.2",
